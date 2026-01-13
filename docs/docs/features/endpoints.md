@@ -5,6 +5,7 @@ title: Endpoints
 
 OAuth2 Proxy responds directly to the following endpoints. All other endpoints will be proxied upstream when authenticated. The `/oauth2` prefix can be changed with the `--proxy-prefix` config variable.
 
+- / - the proxy endpoint provides authentication and returns the appropriate 40x error if not authenticated or authorized then passes the request upstream.
 - /robots.txt - returns a 200 OK response that disallows all User-agents from all paths; see [robotstxt.org](http://www.robotstxt.org/) for more info
 - /ping - returns a 200 OK response, which is intended for use with health checks
 - /ready - returns a 200 OK response if all the underlying connections (e.g., Redis store) are connected
@@ -14,7 +15,7 @@ OAuth2 Proxy responds directly to the following endpoints. All other endpoints w
 - /oauth2/start - a URL that will redirect to start the OAuth cycle
 - /oauth2/callback - the URL used at the end of the OAuth cycle. The oauth app will be configured with this as the callback url.
 - /oauth2/userinfo - the URL is used to return user's email from the session in JSON format.
-- /oauth2/auth - only returns a 202 Accepted response or a 401 Unauthorized response; for use with the [Nginx `auth_request` directive](../configuration/overview.md#configuring-for-use-with-the-nginx-auth_request-directive)
+- /oauth2/auth - only returns a 202 Accepted response or a 401 Unauthorized response; for use with the [Nginx `auth_request` directive](../configuration/integration#configuring-for-use-with-the-nginx-auth_request-directive)
 - /oauth2/static/\* - stylesheets and other dependencies used in the sign_in and error pages
 
 ### Sign out
@@ -40,6 +41,17 @@ BEWARE that the domain you want to redirect to (`my-oidc-provider.example.com` i
 ### Auth
 
 This endpoint returns 202 Accepted response or a 401 Unauthorized response.
+
+It can be configured using the following query parameters:
+- `allowed_groups`: comma separated list of allowed groups
+- `allowed_email_domains`: comma separated list of allowed email domains
+- `allowed_emails`: comma separated list of allowed emails
+
+### Proxy (/)
+
+This endpoint returns the upstream response if authenticated.
+If unauthenticated it returns a 401 Unauthorized. If the authenticatd user
+is not in one of the allowed groups, or emails then it returns a 403 forbidden
 
 It can be configured using the following query parameters:
 - `allowed_groups`: comma separated list of allowed groups

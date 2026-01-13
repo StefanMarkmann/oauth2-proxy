@@ -14,6 +14,7 @@ import (
 	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/apis/options"
 	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/app/pagewriter"
 	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/logger"
+	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/util/ptr"
 )
 
 // ProxyErrorHandler is a function that will be used to render error pages when
@@ -27,12 +28,12 @@ func NewProxy(upstreams options.UpstreamConfig, sigData *options.SignatureData, 
 		serveMux: mux.NewRouter(),
 	}
 
-	if upstreams.ProxyRawPath {
+	if ptr.Deref(upstreams.ProxyRawPath, options.DefaultUpstreamProxyRawPath) {
 		m.serveMux.UseEncodedPath()
 	}
 
 	for _, upstream := range sortByPathLongest(upstreams.Upstreams) {
-		if upstream.Static {
+		if ptr.Deref(upstream.Static, options.DefaultUpstreamStatic) {
 			if err := m.registerStaticResponseHandler(upstream, writer); err != nil {
 				return nil, fmt.Errorf("could not register static upstream %q: %v", upstream.ID, err)
 			}
@@ -74,14 +75,14 @@ func (m *multiUpstreamProxy) ServeHTTP(rw http.ResponseWriter, req *http.Request
 
 // registerStaticResponseHandler registers a static response handler with at the given path.
 func (m *multiUpstreamProxy) registerStaticResponseHandler(upstream options.Upstream, writer pagewriter.Writer) error {
-	logger.Printf("mapping path %q => static response %d", upstream.Path, derefStaticCode(upstream.StaticCode))
+	logger.Printf("mapping path %q => static response %d", upstream.Path, ptr.Deref(upstream.StaticCode, options.DefaultUpstreamStaticCode))
 	return m.registerHandler(upstream, newStaticResponseHandler(upstream.ID, upstream.StaticCode), writer)
 }
 
 // registerFileServer registers a new fileServer based on the configuration given.
 func (m *multiUpstreamProxy) registerFileServer(upstream options.Upstream, u *url.URL, writer pagewriter.Writer) error {
 	logger.Printf("mapping path %q => file system %q", upstream.Path, u.Path)
-	return m.registerHandler(upstream, newFileServer(upstream.ID, upstream.Path, u.Path), writer)
+	return m.registerHandler(upstream, newFileServer(upstream, u.Path), writer)
 }
 
 // registerHTTPUpstreamProxy registers a new httpUpstreamProxy based on the configuration given.

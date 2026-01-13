@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/apis/options"
+	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/util/ptr"
 	. "github.com/onsi/gomega"
 )
 
@@ -81,12 +82,12 @@ func TestSkipOIDCDiscovery(t *testing.T) {
 		ClientSecretFile: clientSecret,
 		OIDCConfig: options.OIDCOptions{
 			IssuerURL:     msIssuerURL,
-			SkipDiscovery: true,
+			SkipDiscovery: ptr.To(true),
 		},
 	}
 
 	_, err := newProviderDataFromConfig(providerConfig)
-	g.Expect(err).To(MatchError("error building OIDC ProviderVerifier: invalid provider verifier options: missing required setting: jwks-url"))
+	g.Expect(err).To(MatchError("error building OIDC ProviderVerifier: invalid provider verifier options: missing required setting: jwks-url or public-key-files"))
 
 	providerConfig.LoginURL = msAuthURL
 	providerConfig.RedeemURL = msTokenURL
@@ -108,7 +109,7 @@ func TestURLsCorrectlyParsed(t *testing.T) {
 		RedeemURL:        msTokenURL,
 		OIDCConfig: options.OIDCOptions{
 			IssuerURL:     msIssuerURL,
-			SkipDiscovery: true,
+			SkipDiscovery: ptr.To(true),
 			JwksURL:       msKeysURL,
 		},
 	}
@@ -137,10 +138,30 @@ func TestScope(t *testing.T) {
 			expectedScope:   "openid email profile",
 		},
 		{
-			name:            "oidc: with no scope provided and groups",
+			name:            "oidc: with no scope provided and allowed groups",
 			configuredType:  "oidc",
 			configuredScope: "",
 			expectedScope:   "openid email profile groups",
+			allowedGroups:   []string{"foo"},
+		},
+		{
+			name:            "oidc: with custom scope including groups without allowed groups",
+			configuredType:  "oidc",
+			configuredScope: "myscope groups",
+			expectedScope:   "myscope groups",
+		},
+		{
+			name:            "oidc: with custom scope without groups but allowed groups",
+			configuredType:  "oidc",
+			configuredScope: "myscope",
+			expectedScope:   "myscope",
+			allowedGroups:   []string{"foo"},
+		},
+		{
+			name:            "oidc: with custom scope with groups and allowed groups",
+			configuredType:  "oidc",
+			configuredScope: "myscope groups",
+			expectedScope:   "myscope groups",
 			allowedGroups:   []string{"foo"},
 		},
 		{
@@ -161,6 +182,27 @@ func TestScope(t *testing.T) {
 			configuredScope: "read:user read:org",
 			expectedScope:   "read:user read:org",
 		},
+		{
+			name:            "keycloak: with no scope provided and groups",
+			configuredType:  "keycloak-oidc",
+			configuredScope: "",
+			expectedScope:   "openid email profile groups",
+			allowedGroups:   []string{"foo"},
+		},
+		{
+			name:            "keycloak: with custom scope and groups",
+			configuredType:  "keycloak-oidc",
+			configuredScope: "myscope",
+			expectedScope:   "myscope",
+			allowedGroups:   []string{"foo"},
+		},
+		{
+			name:            "keycloak: with custom scope and groups scope",
+			configuredType:  "keycloak-oidc",
+			configuredScope: "myscope groups",
+			expectedScope:   "myscope groups",
+			allowedGroups:   []string{"foo"},
+		},
 	}
 
 	for _, tc := range testCases {
@@ -175,7 +217,7 @@ func TestScope(t *testing.T) {
 			AllowedGroups:    tc.allowedGroups,
 			OIDCConfig: options.OIDCOptions{
 				IssuerURL:     msIssuerURL,
-				SkipDiscovery: true,
+				SkipDiscovery: ptr.To(true),
 				JwksURL:       msKeysURL,
 			},
 		}
@@ -256,7 +298,7 @@ func TestEmailClaimCorrectlySet(t *testing.T) {
 				RedeemURL:        msTokenURL,
 				OIDCConfig: options.OIDCOptions{
 					IssuerURL:     msIssuerURL,
-					SkipDiscovery: true,
+					SkipDiscovery: ptr.To(true),
 					JwksURL:       msKeysURL,
 					UserIDClaim:   tc.userIDClaim,
 					EmailClaim:    tc.emailClaim,

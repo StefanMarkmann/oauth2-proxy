@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/logger"
+	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/util/ptr"
 	"github.com/spf13/pflag"
 )
 
@@ -31,10 +32,11 @@ type LegacyOptions struct {
 func NewLegacyOptions() *LegacyOptions {
 	return &LegacyOptions{
 		LegacyUpstreams: LegacyUpstreams{
-			PassHostHeader:  true,
-			ProxyWebSockets: true,
-			FlushInterval:   DefaultUpstreamFlushInterval,
-			Timeout:         DefaultUpstreamTimeout,
+			PassHostHeader:    true,
+			ProxyWebSockets:   true,
+			FlushInterval:     DefaultUpstreamFlushInterval,
+			Timeout:           DefaultUpstreamTimeout,
+			DisableKeepAlives: false,
 		},
 
 		LegacyHeaders: LegacyHeaders{
@@ -94,6 +96,7 @@ func (l *LegacyOptions) ToOptions() (*Options, error) {
 		return nil, fmt.Errorf("error converting provider: %v", err)
 	}
 	l.Options.Providers = providers
+	l.Options.EnsureDefaults()
 
 	return &l.Options, nil
 }
@@ -105,6 +108,7 @@ type LegacyUpstreams struct {
 	SSLUpstreamInsecureSkipVerify bool          `flag:"ssl-upstream-insecure-skip-verify" cfg:"ssl_upstream_insecure_skip_verify"`
 	Upstreams                     []string      `flag:"upstream" cfg:"upstreams"`
 	Timeout                       time.Duration `flag:"upstream-timeout" cfg:"upstream_timeout"`
+	DisableKeepAlives             bool          `flag:"disable-keep-alives" cfg:"disable_keep_alives"`
 }
 
 func legacyUpstreamsFlagSet() *pflag.FlagSet {
@@ -116,6 +120,7 @@ func legacyUpstreamsFlagSet() *pflag.FlagSet {
 	flagSet.Bool("ssl-upstream-insecure-skip-verify", false, "skip validation of certificates presented when using HTTPS upstreams")
 	flagSet.StringSlice("upstream", []string{}, "the http url(s) of the upstream endpoint, file:// paths for static files or static://<status_code> for static response. Routing is based on the path")
 	flagSet.Duration("upstream-timeout", DefaultUpstreamTimeout, "maximum amount of time the server will wait for a response from the upstream")
+	flagSet.Bool("disable-keep-alives", false, "disable HTTP keep-alive connections to the upstream server")
 
 	return flagSet
 }
@@ -133,17 +138,18 @@ func (l *LegacyUpstreams) convert() (UpstreamConfig, error) {
 			u.Path = "/"
 		}
 
-		flushInterval := Duration(l.FlushInterval)
-		timeout := Duration(l.Timeout)
+		flushInterval := l.FlushInterval
+		timeout := l.Timeout
 		upstream := Upstream{
 			ID:                    u.Path,
 			Path:                  u.Path,
 			URI:                   upstreamString,
-			InsecureSkipTLSVerify: l.SSLUpstreamInsecureSkipVerify,
+			InsecureSkipTLSVerify: &l.SSLUpstreamInsecureSkipVerify,
 			PassHostHeader:        &l.PassHostHeader,
 			ProxyWebSockets:       &l.ProxyWebSockets,
 			FlushInterval:         &flushInterval,
 			Timeout:               &timeout,
+			DisableKeepAlives:     &l.DisableKeepAlives,
 		}
 
 		switch u.Scheme {
@@ -160,7 +166,7 @@ func (l *LegacyUpstreams) convert() (UpstreamConfig, error) {
 				logger.Errorf("unable to convert %q to int, use default \"200\"", u.Host)
 				responseCode = 200
 			}
-			upstream.Static = true
+			upstream.Static = ptr.To(true)
 			upstream.StaticCode = &responseCode
 
 			// This is not allowed to be empty and must be unique
@@ -171,7 +177,8 @@ func (l *LegacyUpstreams) convert() (UpstreamConfig, error) {
 
 			// Force defaults compatible with static responses
 			upstream.URI = ""
-			upstream.InsecureSkipTLSVerify = false
+			upstream.InsecureSkipTLSVerify = ptr.To(false)
+			upstream.DisableKeepAlives = ptr.To(false)
 			upstream.PassHostHeader = nil
 			upstream.ProxyWebSockets = nil
 			upstream.FlushInterval = nil
@@ -248,7 +255,7 @@ func (l *LegacyHeaders) getRequestHeaders() []Header {
 	}
 
 	for i := range requestHeaders {
-		requestHeaders[i].PreserveRequestValue = !l.SkipAuthStripHeaders
+		requestHeaders[i].PreserveRequestValue = ptr.To(!l.SkipAuthStripHeaders)
 	}
 
 	return requestHeaders
@@ -282,7 +289,8 @@ func getBasicAuthHeader(preferEmailToUser bool, basicAuthPassword string) Header
 	}
 
 	return Header{
-		Name: "Authorization",
+		Name:                 "Authorization",
+		PreserveRequestValue: ptr.To(false),
 		Values: []HeaderValue{
 			{
 				ClaimSource: &ClaimSource{
@@ -300,7 +308,8 @@ func getBasicAuthHeader(preferEmailToUser bool, basicAuthPassword string) Header
 func getPassUserHeaders(preferEmailToUser bool) []Header {
 	headers := []Header{
 		{
-			Name: "X-Forwarded-Groups",
+			Name:                 "X-Forwarded-Groups",
+			PreserveRequestValue: ptr.To(false),
 			Values: []HeaderValue{
 				{
 					ClaimSource: &ClaimSource{
@@ -314,7 +323,8 @@ func getPassUserHeaders(preferEmailToUser bool) []Header {
 	if preferEmailToUser {
 		return append(headers,
 			Header{
-				Name: "X-Forwarded-User",
+				Name:                 "X-Forwarded-User",
+				PreserveRequestValue: ptr.To(false),
 				Values: []HeaderValue{
 					{
 						ClaimSource: &ClaimSource{
@@ -328,7 +338,8 @@ func getPassUserHeaders(preferEmailToUser bool) []Header {
 
 	return append(headers,
 		Header{
-			Name: "X-Forwarded-User",
+			Name:                 "X-Forwarded-User",
+			PreserveRequestValue: ptr.To(false),
 			Values: []HeaderValue{
 				{
 					ClaimSource: &ClaimSource{
@@ -338,7 +349,8 @@ func getPassUserHeaders(preferEmailToUser bool) []Header {
 			},
 		},
 		Header{
-			Name: "X-Forwarded-Email",
+			Name:                 "X-Forwarded-Email",
+			PreserveRequestValue: ptr.To(false),
 			Values: []HeaderValue{
 				{
 					ClaimSource: &ClaimSource{
@@ -352,7 +364,8 @@ func getPassUserHeaders(preferEmailToUser bool) []Header {
 
 func getPassAccessTokenHeader() Header {
 	return Header{
-		Name: "X-Forwarded-Access-Token",
+		Name:                 "X-Forwarded-Access-Token",
+		PreserveRequestValue: ptr.To(false),
 		Values: []HeaderValue{
 			{
 				ClaimSource: &ClaimSource{
@@ -365,7 +378,8 @@ func getPassAccessTokenHeader() Header {
 
 func getAuthorizationHeader() Header {
 	return Header{
-		Name: "Authorization",
+		Name:                 "Authorization",
+		PreserveRequestValue: ptr.To(false),
 		Values: []HeaderValue{
 			{
 				ClaimSource: &ClaimSource{
@@ -379,7 +393,8 @@ func getAuthorizationHeader() Header {
 
 func getPreferredUsernameHeader() Header {
 	return Header{
-		Name: "X-Forwarded-Preferred-Username",
+		Name:                 "X-Forwarded-Preferred-Username",
+		PreserveRequestValue: ptr.To(false),
 		Values: []HeaderValue{
 			{
 				ClaimSource: &ClaimSource{
@@ -393,7 +408,8 @@ func getPreferredUsernameHeader() Header {
 func getXAuthRequestHeaders() []Header {
 	headers := []Header{
 		{
-			Name: "X-Auth-Request-User",
+			Name:                 "X-Auth-Request-User",
+			PreserveRequestValue: ptr.To(false),
 			Values: []HeaderValue{
 				{
 					ClaimSource: &ClaimSource{
@@ -403,7 +419,8 @@ func getXAuthRequestHeaders() []Header {
 			},
 		},
 		{
-			Name: "X-Auth-Request-Email",
+			Name:                 "X-Auth-Request-Email",
+			PreserveRequestValue: ptr.To(false),
 			Values: []HeaderValue{
 				{
 					ClaimSource: &ClaimSource{
@@ -413,7 +430,8 @@ func getXAuthRequestHeaders() []Header {
 			},
 		},
 		{
-			Name: "X-Auth-Request-Preferred-Username",
+			Name:                 "X-Auth-Request-Preferred-Username",
+			PreserveRequestValue: ptr.To(false),
 			Values: []HeaderValue{
 				{
 					ClaimSource: &ClaimSource{
@@ -423,7 +441,8 @@ func getXAuthRequestHeaders() []Header {
 			},
 		},
 		{
-			Name: "X-Auth-Request-Groups",
+			Name:                 "X-Auth-Request-Groups",
+			PreserveRequestValue: ptr.To(false),
 			Values: []HeaderValue{
 				{
 					ClaimSource: &ClaimSource{
@@ -439,7 +458,8 @@ func getXAuthRequestHeaders() []Header {
 
 func getXAuthRequestAccessTokenHeader() Header {
 	return Header{
-		Name: "X-Auth-Request-Access-Token",
+		Name:                 "X-Auth-Request-Access-Token",
+		PreserveRequestValue: ptr.To(false),
 		Values: []HeaderValue{
 			{
 				ClaimSource: &ClaimSource{
@@ -470,7 +490,7 @@ func legacyServerFlagset() *pflag.FlagSet {
 	flagSet.String("metrics-secure-address", "", "the address /metrics will be served on for HTTPS clients (e.g. \":9100\")")
 	flagSet.String("metrics-tls-cert-file", "", "path to certificate file for secure metrics server")
 	flagSet.String("metrics-tls-key-file", "", "path to private key file for secure metrics server")
-	flagSet.String("http-address", "127.0.0.1:4180", "[http://]<addr>:<port> or unix://<path> to listen on for HTTP clients")
+	flagSet.String("http-address", "127.0.0.1:4180", "[http://]<addr>:<port> or unix://<path> or fd:<int> (case insensitive) to listen on for HTTP clients")
 	flagSet.String("https-address", ":443", "<addr>:<port> to listen on for HTTPS clients")
 	flagSet.String("tls-cert-file", "", "path to certificate file")
 	flagSet.String("tls-key-file", "", "path to private key file")
@@ -488,6 +508,8 @@ type LegacyProvider struct {
 	KeycloakGroups                         []string `flag:"keycloak-group" cfg:"keycloak_groups"`
 	AzureTenant                            string   `flag:"azure-tenant" cfg:"azure_tenant"`
 	AzureGraphGroupField                   string   `flag:"azure-graph-group-field" cfg:"azure_graph_group_field"`
+	EntraIDAllowedTenants                  []string `flag:"entra-id-allowed-tenant" cfg:"entra_id_allowed_tenants"`
+	EntraIDFederatedTokenAuth              bool     `flag:"entra-id-federated-token-auth" cfg:"entra_id_federated_token_auth"`
 	BitbucketTeam                          string   `flag:"bitbucket-team" cfg:"bitbucket_team"`
 	BitbucketRepository                    string   `flag:"bitbucket-repository" cfg:"bitbucket_repository"`
 	GitHubOrg                              string   `flag:"github-org" cfg:"github_org"`
@@ -503,6 +525,8 @@ type LegacyProvider struct {
 	GoogleServiceAccountJSON               string   `flag:"google-service-account-json" cfg:"google_service_account_json"`
 	GoogleUseApplicationDefaultCredentials bool     `flag:"google-use-application-default-credentials" cfg:"google_use_application_default_credentials"`
 	GoogleTargetPrincipal                  string   `flag:"google-target-principal" cfg:"google_target_principal"`
+	GoogleUseOrganizationID                bool     `flag:"google-use-organization-id" cfg:"google_use_organization_id"`
+	GoogleAdminAPIUserScope                string   `flag:"google-admin-api-user-scope" cfg:"google_admin_api_user_scope"`
 
 	// These options allow for other providers besides Google, with
 	// potential overrides.
@@ -520,7 +544,9 @@ type LegacyProvider struct {
 	OIDCGroupsClaim                    string   `flag:"oidc-groups-claim" cfg:"oidc_groups_claim"`
 	OIDCAudienceClaims                 []string `flag:"oidc-audience-claim" cfg:"oidc_audience_claims"`
 	OIDCExtraAudiences                 []string `flag:"oidc-extra-audience" cfg:"oidc_extra_audiences"`
+	OIDCPublicKeyFiles                 []string `flag:"oidc-public-key-file" cfg:"oidc_public_key_files"`
 	LoginURL                           string   `flag:"login-url" cfg:"login_url"`
+	AuthRequestResponseMode            string   `flag:"auth-request-response-mode" cfg:"auth_request_response_mode"`
 	RedeemURL                          string   `flag:"redeem-url" cfg:"redeem_url"`
 	ProfileURL                         string   `flag:"profile-url" cfg:"profile_url"`
 	SkipClaimsFromProfileURL           bool     `flag:"skip-claims-from-profile-url" cfg:"skip_claims_from_profile_url"`
@@ -550,6 +576,8 @@ func legacyProviderFlagSet() *pflag.FlagSet {
 	flagSet.StringSlice("keycloak-group", []string{}, "restrict logins to members of these groups (may be given multiple times)")
 	flagSet.String("azure-tenant", "common", "go to a tenant-specific or common (tenant-independent) endpoint.")
 	flagSet.String("azure-graph-group-field", "", "configures the group field to be used when building the groups list(`id` or `displayName`. Default is `id`) from Microsoft Graph(available only for v2.0 oidc url). Based on this value, the `allowed-group` config values should be adjusted accordingly. If using `id` as group field, `allowed-group` should contains groups IDs, if using `displayName` as group field, `allowed-group` should contains groups name")
+	flagSet.StringSlice("entra-id-allowed-tenant", []string{}, "list of tenants allowed for MS Entra ID multi-tenant application")
+	flagSet.Bool("entra-id-federated-token-auth", false, "enable oAuth client authentication with federated token projected by Azure Workload Identity plugin, instead of client secret.")
 	flagSet.String("bitbucket-team", "", "restrict logins to members of this team")
 	flagSet.String("bitbucket-repository", "", "restrict logins to user with access to this repository")
 	flagSet.String("github-org", "", "restrict logins to members of this organisation")
@@ -577,9 +605,11 @@ func legacyProviderFlagSet() *pflag.FlagSet {
 	flagSet.String("oidc-email-claim", OIDCEmailClaim, "which OIDC claim contains the user's email")
 	flagSet.StringSlice("oidc-audience-claim", OIDCAudienceClaims, "which OIDC claims are used as audience to verify against client id")
 	flagSet.StringSlice("oidc-extra-audience", []string{}, "additional audiences allowed to pass audience verification")
+	flagSet.StringSlice("oidc-public-key-file", []string{}, "path to public key file in PEM format to use for verifying JWT tokens (may be given multiple times)")
 	flagSet.String("login-url", "", "Authentication endpoint")
 	flagSet.String("redeem-url", "", "Token redemption endpoint")
 	flagSet.String("profile-url", "", "Profile access endpoint")
+	flagSet.String("auth-request-response-mode", "", "Authorization request response mode")
 	flagSet.Bool("skip-claims-from-profile-url", false, "Skip loading missing claims from profile URL")
 	flagSet.String("resource", "", "The resource that is protected (Azure AD only)")
 	flagSet.String("validate-url", "", "Access token validation endpoint")
@@ -610,6 +640,8 @@ func legacyGoogleFlagSet() *pflag.FlagSet {
 	flagSet.String("google-service-account-json", "", "the path to the service account json credentials")
 	flagSet.String("google-use-application-default-credentials", "", "use application default credentials instead of service account json (i.e. GKE Workload Identity)")
 	flagSet.String("google-target-principal", "", "the target principal to impersonate when using ADC")
+	flagSet.String("google-use-organization-id", "", "use organization id as preferred username")
+	flagSet.String("google-admin-api-user-scope", "", "authorization scope required to call users.get, can be one of ")
 
 	return flagSet
 }
@@ -667,32 +699,34 @@ func (l *LegacyProvider) convert() (Providers, error) {
 		ClientSecretFile:         l.ClientSecretFile,
 		Type:                     ProviderType(l.ProviderType),
 		CAFiles:                  l.ProviderCAFiles,
-		UseSystemTrustStore:      l.UseSystemTrustStore,
+		UseSystemTrustStore:      &l.UseSystemTrustStore,
 		LoginURL:                 l.LoginURL,
 		RedeemURL:                l.RedeemURL,
 		ProfileURL:               l.ProfileURL,
-		SkipClaimsFromProfileURL: l.SkipClaimsFromProfileURL,
+		SkipClaimsFromProfileURL: &l.SkipClaimsFromProfileURL,
 		ProtectedResource:        l.ProtectedResource,
 		ValidateURL:              l.ValidateURL,
 		Scope:                    l.Scope,
 		AllowedGroups:            l.AllowedGroups,
 		CodeChallengeMethod:      l.CodeChallengeMethod,
 		BackendLogoutURL:         l.BackendLogoutURL,
+		AuthRequestResponseMode:  l.AuthRequestResponseMode,
 	}
 
 	// This part is out of the switch section for all providers that support OIDC
 	provider.OIDCConfig = OIDCOptions{
 		IssuerURL:                      l.OIDCIssuerURL,
-		InsecureAllowUnverifiedEmail:   l.InsecureOIDCAllowUnverifiedEmail,
-		InsecureSkipIssuerVerification: l.InsecureOIDCSkipIssuerVerification,
-		InsecureSkipNonce:              l.InsecureOIDCSkipNonce,
-		SkipDiscovery:                  l.SkipOIDCDiscovery,
+		InsecureAllowUnverifiedEmail:   &l.InsecureOIDCAllowUnverifiedEmail,
+		InsecureSkipIssuerVerification: &l.InsecureOIDCSkipIssuerVerification,
+		InsecureSkipNonce:              &l.InsecureOIDCSkipNonce,
+		SkipDiscovery:                  &l.SkipOIDCDiscovery,
 		JwksURL:                        l.OIDCJwksURL,
 		UserIDClaim:                    l.UserIDClaim,
 		EmailClaim:                     l.OIDCEmailClaim,
 		GroupsClaim:                    l.OIDCGroupsClaim,
 		AudienceClaims:                 l.OIDCAudienceClaims,
 		ExtraAudiences:                 l.OIDCExtraAudiences,
+		PublicKeyFiles:                 l.OIDCPublicKeyFiles,
 	}
 
 	// Support for legacy configuration option
@@ -753,8 +787,15 @@ func (l *LegacyProvider) convert() (Providers, error) {
 			Groups:                           l.GoogleGroups,
 			AdminEmail:                       l.GoogleAdminEmail,
 			ServiceAccountJSON:               l.GoogleServiceAccountJSON,
-			UseApplicationDefaultCredentials: l.GoogleUseApplicationDefaultCredentials,
+			UseApplicationDefaultCredentials: &l.GoogleUseApplicationDefaultCredentials,
 			TargetPrincipal:                  l.GoogleTargetPrincipal,
+			UseOrganizationID:                &l.GoogleUseOrganizationID,
+			AdminAPIUserScope:                l.GoogleAdminAPIUserScope,
+		}
+	case "entra-id":
+		provider.MicrosoftEntraIDConfig = MicrosoftEntraIDOptions{
+			AllowedTenants:     l.EntraIDAllowedTenants,
+			FederatedTokenAuth: &l.EntraIDFederatedTokenAuth,
 		}
 	}
 
