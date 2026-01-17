@@ -1144,6 +1144,13 @@ func TestAuthOnlyEndpointRedirectWithSkipProviderButton(t *testing.T) {
 	assert.Equal(t, http.StatusFound, test.rw.Code)
 	location := test.rw.Header().Get("Location")
 	assert.NotEmpty(t, location, "Expected Location header for redirect")
+
+	// Verify the redirect points to the OAuth provider's authorize endpoint
+	// and contains key OAuth parameters
+	assert.Contains(t, location, "/oauth/authorize", "Expected redirect to OAuth authorize endpoint")
+	assert.Contains(t, location, "client_id=", "Expected client_id in redirect URL")
+	assert.Contains(t, location, "redirect_uri=", "Expected redirect_uri in redirect URL")
+	assert.Contains(t, location, "state=", "Expected state parameter in redirect URL")
 }
 
 func TestAuthOnlyEndpointUnauthorizedOnExpiration(t *testing.T) {
